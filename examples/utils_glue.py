@@ -17,10 +17,11 @@
 
 from __future__ import absolute_import, division, print_function
 
-import csv
-import logging
 import os
 import sys
+import csv
+import logging
+import json_lines
 from io import open
 
 from scipy.stats import pearsonr, spearmanr
@@ -85,6 +86,19 @@ class DataProcessor(object):
                 if sys.version_info[0] == 2:
                     line = list(unicode(cell, 'utf-8') for cell in line)
                 lines.append(line)
+            return lines
+
+    @classmethod
+    def _read_jsonl(cls, input_file, quotechar=None):
+        """Reads a jsonl file"""
+        with open(input_file,"r",encoding="utf-8-sig") as f:
+            lines = []
+            for line in json_lines.reader(f):
+                if sys.version_info[0] == 2:
+                    # @TODO: Handel the utf-8 encoding for python 2.* version
+                    lines.append(line)
+                if line['gold_label'] != '-': # A hack to remove examples with no label.
+                    lines.append(line)
             return lines
 
 
@@ -387,6 +401,36 @@ class WnliProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class SnliProcessor(DataProcessor):
+    """Processor for the QNLI data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_jsonl(os.path.join(data_dir, "train.jsonl")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.jsonl")),
+            "dev_matched")
+
+    def get_labels(self):
+        """See base class."""
+        return ["entailment", "neutral", "contradiction"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets. A little different than rest as it is a json object"""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, line['sentence1'])
+            text_a = line['sentence1']
+            text_b = line['sentence2']
+            label = line['gold_label']
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
                                  tokenizer, output_mode,
@@ -564,6 +608,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "wnli":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == 'snli':
+        return {"acc": simple_accuracy(preds,labels)}
     else:
         raise KeyError(task_name)
 
@@ -578,6 +624,7 @@ processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    "snli" : SnliProcessor,
 }
 
 output_modes = {
@@ -591,6 +638,7 @@ output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    "snli": "classification",
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -603,4 +651,5 @@ GLUE_TASKS_NUM_LABELS = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
+    "snli":3
 }
